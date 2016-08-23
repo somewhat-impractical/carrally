@@ -1,0 +1,256 @@
+<html>
+<head>
+<meta charset="utf-8" />
+<title></title>
+<style type="text/css">
+	:root {
+		background-color: black;
+		color: white;
+		font-family: open sans;
+		font-size: 18px;
+		line-height: 27px;
+		height: 100%;
+	}
+	body {
+		height: 100%;
+		margin: 0;
+		display: flex;
+	}
+	#tableContainer {
+		flex: 4;
+		align-self: center;
+		padding: 0 1em;
+	}
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		white-space: nowrap;
+	}
+	th, td {
+		padding: 0 0.25em;
+		font-size: 18px;
+		line-height: 27px;
+	}
+	thead > tr > th {
+		width: 2.5em;
+		/*height: 27px;*/
+		height: 182px;
+		vertical-align: bottom;
+		font-weight: 600;
+	}
+	thead > tr > th > div {
+		position: absolute;
+		transform: rotate(-90deg);
+		transform-origin: 0 0;
+		line-height: 2.25em;
+		padding-left: 0.25em;
+	}
+	thead > tr > th > div::before {
+		content: "\25A0\A0";
+	}
+	tbody > tr > th {
+		text-align: left;
+		font-weight: 600;
+	}
+	tbody > tr > td,
+	tfoot > tr > th {
+		text-align: center;
+	}
+	#mapContainer {
+		flex: 3;
+	}
+	svg {
+		margin: 0 auto;
+	}
+	svg > defs > marker {
+		stroke-width: 1px;
+		overflow: visible;
+	}
+	svg > g#rings > circle {
+		fill: none;
+		stroke: #999;
+		stroke-width: 0.5px;
+		stroke-dasharray: 10;
+	}
+	svg > path {
+		stroke-width: 2.5px;
+	}
+</style>
+</head>
+<body>
+<div id="tableContainer">
+	<table id="tasksGrid" cellspacing="0">
+		<thead><tr><td></td></tr></thead>
+		<tfoot><tr><td></td></tr></tfoot>
+		<tbody></tbody>
+	</table>
+</div>
+<div id="mapContainer">
+	<svg id="map" width="100%" height="100%" viewBox="20 0 640 680">
+		<defs>
+			<g id="marker">
+				<circle r="8" cy="0" cx="0" fill="white" stroke="blue" stroke-width="3"></circle>
+				<circle r="4" cy="0" cx="0" fill="red"></circle>
+			</g>
+		</defs>
+		<image xlink:href="map.png" x="0" y="-293" width="680" height="1066" />
+		<g id="rings">
+			<circle cx="362" cy="358" r="69" />
+			<circle cx="362" cy="358" r="138" />
+			<circle cx="362" cy="358" r="207" />
+			<circle cx="362" cy="358" r="276" />
+			<circle cx="362" cy="358" r="345" />
+		</g>
+		<g id="tasks">
+		</g>
+	</svg>
+</div>
+
+<script type="text/javascript" src="data.js"></script>
+<script type="text/javascript">
+
+/* globals teams, homebase, tasks, getTeam, getTask */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const XLINKNS = 'http://www.w3.org/1999/xlink';
+
+navigator.serviceWorker.register('/service-worker.js');
+navigator.serviceWorker.addEventListener('message', handleBroadcast);
+function handleBroadcast({data}) {
+	if (data.broadcastName != 'rally') {
+		return;
+	}
+
+	teams = JSON.parse(localStorage.getItem('rallyTeams')); // jshint ignore: line
+
+	switch (data.action) {
+	case 'taskCompleted':
+		updateScores(data.teamID);
+		/* falls through */
+	case 'taskAssigned':
+		drawArrow(data.teamID);
+		return;
+	}
+}
+
+let tasksGrid = document.getElementById('tasksGrid');
+let map = document.getElementById('map');
+
+(function() {
+	for (let team of teams) {
+		let th = document.createElement('th');
+		th.style.color = team.color;
+		let div = document.createElement('div');
+		div.textContent = team.name;
+		th.appendChild(div);
+		tasksGrid.tHead.rows[0].appendChild(th);
+		th = document.createElement('th');
+		th.textContent = '0';
+		tasksGrid.tFoot.rows[0].appendChild(th);
+
+		let arrowhead = document.createElementNS(SVGNS, 'marker');
+		arrowhead.setAttribute('markerUnits', 'userSpaceOnUse');
+		arrowhead.setAttribute('orient', 'auto');
+		arrowhead.setAttribute('id', 'arrowhead-team' + team.id);
+		let path = document.createElementNS(SVGNS, 'path');
+		path.setAttribute('fill', team.color);
+		path.setAttribute('d', 'M -24,0 L -32,-10 L 0,0 L -32,10 L -24,0 z');
+		arrowhead.appendChild(path);
+		map.querySelector('defs').appendChild(arrowhead);
+
+		drawArrow(team.id);
+	}
+
+	for (let task of tasks) {
+		let tr = document.createElement('tr');
+		tr.dataset.task = task.id;
+		let th = document.createElement('th');
+		th.textContent = task.name;
+		tr.appendChild(th);
+		for (var i = 0; i < teams.length; i++) {
+			let td = document.createElement('td');
+			tr.appendChild(td);
+		}
+		tasksGrid.tBodies[0].appendChild(tr);
+
+		let marker = document.createElementNS(SVGNS, 'use');
+		marker.setAttributeNS(XLINKNS, 'href', '#marker');
+		marker.setAttribute('title', task.name);
+		marker.setAttribute('x', task.x);
+		marker.setAttribute('y', task.y);
+		map.querySelector('#tasks').appendChild(marker);
+	}
+
+	for (let team of teams) {
+		updateScores(team.id);
+	}
+})();
+
+function updateScores(teamID) {
+	let team = getTeam(teamID);
+
+	let tBody = tasksGrid.tBodies[0];
+	let score = 0;
+	for (let r of tBody.rows) {
+		let taskID = parseInt(r.dataset.task, 10);
+		let task = getTask(taskID);
+		let cell = r.cells[teamID + 1];
+		if (team.tasksCompleted.includes(taskID)) {
+			cell.textContent = task.points;
+			score += task.points;
+		} else {
+			cell.textContent = '-';
+		}
+	}
+	tasksGrid.tFoot.rows[0].cells[team.id + 1].textContent = score;
+}
+
+function drawArrow(teamID) {
+	let team = getTeam(teamID);
+	let lastTask;
+	if (team.tasksCompleted.length > 0) {
+		lastTask = getTask(team.tasksCompleted[team.tasksCompleted.length - 1]);
+	} else {
+		lastTask = homebase;
+	}
+
+	let currentTask;
+	if (typeof team.currentTask == 'number') {
+		currentTask = getTask(team.currentTask);
+	} else {
+		currentTask = homebase;
+	}
+
+	let arrow = document.getElementById('arrow-team' + team.id);
+	if (!arrow) {
+		arrow = document.createElementNS(SVGNS, 'path');
+		arrow.setAttribute('id', 'arrow-team' + team.id);
+		arrow.setAttribute('fill', 'none');
+		arrow.setAttribute('stroke', team.color);
+		arrow.style.markerEnd = 'url(#arrowhead-team' + team.id + ')';
+		map.appendChild(arrow);
+	}
+	let points = [];
+	if (false) {
+		points.push(homebase.x + ',' + homebase.y);
+		for (let t of team.tasksCompleted) {
+			let task = getTask(t);
+			points.push(task.x + ',' + task.y);
+		}
+	} else {
+		points.push(lastTask.x + ',' + lastTask.y);
+	}
+	points.push(currentTask.x + ',' + currentTask.y);
+
+	if (lastTask.id == currentTask.id) {
+		arrow.style.transform = 'rotate(' + 45 * teamID + 'deg)';
+		arrow.style.transformOrigin = currentTask.x + 'px ' + currentTask.y + 'px';
+	} else {
+		arrow.style.transform = arrow.style.transformOrigin = null;
+	}
+
+	arrow.setAttribute('d', 'M' + points.join('L'));
+}
+
+</script>
+</body>
+</html>

@@ -1,0 +1,491 @@
+<html>
+<head>
+<meta charset="utf-8">
+<title>Unread Messages</title>
+<style type="text/css">
+	:root {
+		background-color: black;
+		color: white;
+		font-family: open sans;
+		font-size: 18px;
+		line-height: 27px;
+		height: 100%;
+	}
+	body {
+		margin: 0;
+		height: 100%;
+		display: flex;
+		flex-direction: column;
+	}
+	#tabs {
+		display: flex;
+		font-weight: 600;
+		white-space: nowrap;
+		margin: 0.5em 1em;
+	}
+	#tabs > div {
+		flex: auto;
+		width: 0;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		cursor: pointer;
+	}
+	#tabs > div.alert {
+		color: #fff !important;
+	}
+	#tabs > div:hover > span {
+		text-decoration: underline;
+	}
+	#tabs > div::before {
+		content: "\25A0\A0";
+	}
+	#tabs > div + div {
+		margin-left: 0.25em;
+	}
+	#main {
+		flex: auto;
+		margin: 0 1em 1em;
+		border: 2px var(--current-team-color) solid;
+		padding: 1em;
+		display: flex;
+		justify-content: space-around;
+	}
+	#messages {
+		flex: 4;
+		display: flex;
+		flex-direction: column;
+		margin-right: 1em;
+		max-width: 600px;
+	}
+	#messageListWrap {
+		flex: auto;
+		overflow: hidden;
+		scroll-behavior: smooth;
+		position: relative;
+	}
+	#messageList {
+		position: absolute;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		width: 100%;
+	}
+	#messageList > li {
+		margin-bottom: 0.5em;
+	}
+	#messageList > li.incoming {
+		color: var(--current-team-color);
+	}
+	#messageList > li.outgoing {
+		text-align: right;
+	}
+	#messageList > li > .small {
+		color: #999;
+		font-size: 12px;
+		line-height: 1;
+	}
+	form {
+		margin: 0;
+	}
+	form > div {
+		margin: 0.25em 0;
+	}
+	textarea {
+		background-color: #333;
+		resize: vertical;
+		color: #fff;
+		font-family: open sans;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.5em;
+		font-size: 14px;
+		border: 1px solid;
+		border-color: #0006 #6663 #6666 #0003;
+		border-radius: 1px;
+	}
+	button {
+		background-color: var(--current-team-color);
+		background-image: linear-gradient(#fff2, #0002);
+		font-size: 14px;
+		padding: 0.5em 1em;
+		color: black;
+		border: 1px solid;
+		border-color: #fff6 #0003 #0006 #fff3;
+		border-radius: 1px;
+	}
+	button:disabled {
+		background-color: #333;
+	}
+	button:active:not(:disabled) {
+		background-image: linear-gradient(#0002, #fff2);
+		border-color: #0006 #fff3 #fff6 #0003;
+	}
+	textarea:focus, button:focus {
+		box-shadow: 0 0 3px #fffc;
+	}
+	#taskContainer {
+		margin: 0 1em;
+	}
+	#taskList {
+		margin: 0 0 0.5em;
+		padding: 0;
+		list-style: square inside;
+	}
+	#taskList > li.completed {
+		color: #333;
+	}
+	#taskList > li.current {
+		color: var(--current-team-color);
+	}
+	#taskList > li:not(.completed):not(.current) {
+		cursor: pointer;
+	}
+	#taskList > li:not(.completed):not(.current):hover > span {
+		text-decoration: underline;
+	}
+	#mapContainer {
+		flex: 3;
+		justify-self: center;
+		position: relative;
+	}
+	svg {
+		margin: 0 auto;
+		position: absolute;
+	}
+	svg > defs > marker {
+		stroke-width: 1px;
+		overflow: visible;
+	}
+	svg > g#rings > circle {
+		fill: none;
+		stroke: #999;
+		stroke-width: 0.5px;
+		stroke-dasharray: 10;
+	}
+	svg > path {
+		stroke-width: 2.5px;
+	}
+</style>
+</head>
+<body style="--current-team-color: black;">
+<div id="tabs" onclick="changeTeam(event);">
+	<template id="tabTemplate">
+		<div><span></span></div>
+	</template>
+</div>
+<div id="main">
+	<div id="messages">
+		<div id="messageListWrap">
+			<ul id="messageList"></ul>
+			<template id="messageTemplate">
+				<li>
+					<div class="messageText"></div>
+					<div class="small">
+						<span class="time"></span>
+					</div>
+				</li>
+			</template>
+		</div>
+		<form onsubmit="sendMessage(); return false;">
+			<input type="hidden" name="mobileNumber" />
+			<div><textarea name="messageText" rows="2"></textarea></div>
+			<div>
+				<button type="submit" style="float: right;">Send</button>
+			</div>
+		</form>
+	</div>
+	<div id="taskContainer">
+		<ul id="taskList" onclick="assign(event);">
+			<template id="taskTemplate">
+				<li><span></span></li>
+			</template>
+		</ul>
+		<div>
+			<button id="taskCompleteButton" type="button" onclick="taskCompleted(currentTeamID);">Task Complete</button>
+		</div>
+	</div>
+	<div id="mapContainer">
+		<svg id="map" width="100%" height="100%" viewBox="60 0 560 680">
+			<defs>
+				<g id="marker">
+					<circle r="8" cy="0" cx="0" fill="white" stroke="blue" stroke-width="3"></circle>
+					<circle r="4" cy="0" cx="0" fill="red"></circle>
+				</g>
+			</defs>
+			<image xlink:href="map.png" x="0" y="-293" width="680" height="1066" />
+			<g id="rings">
+				<circle cx="362" cy="358" r="69" />
+				<circle cx="362" cy="358" r="138" />
+				<circle cx="362" cy="358" r="207" />
+				<circle cx="362" cy="358" r="276" />
+				<circle cx="362" cy="358" r="345" />
+			</g>
+			<g id="tasks">
+			</g>
+		</svg>
+	</div>
+</div>
+<script type="text/javascript" src="data.js"></script>
+<script type="text/javascript">
+
+/* globals teams, homebase, tasks, getTeam, getTask, findDirection, findDistance, sendTo, broadcast */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const XLINKNS = 'http://www.w3.org/1999/xlink';
+
+navigator.serviceWorker.register('/service-worker.js');
+navigator.serviceWorker.addEventListener('message', handleBroadcast);
+
+function handleBroadcast({data}) {
+	if (data.broadcastName != 'rally') {
+		return;
+	}
+
+	teams = JSON.parse(localStorage.getItem('rallyTeams')); // jshint ignore: line
+
+	switch (data.action) {
+	case 'taskCompleted':
+	case 'taskAssigned':
+		if (data.teamID == currentTeamID) {
+			updateTaskList(data.teamID);
+			drawArrow(data.teamID);
+		}
+		return;
+	case 'incomingMessage':
+		if (data.messageData.teamID === currentTeamID) {
+			appendMessageDisplay(data.messageData);
+			messageListWrap.scrollTo(0, messageListWrap.scrollTopMax);
+		} else {
+			let tab = tabs.querySelector('[data-team="' + data.messageData.teamID + '"]');
+			tab.classList.add('alert');
+			if (tab.dataset.unread) {
+				tab.dataset.unread = parseInt(tab.dataset.unread, 10) + 1;
+			} else {
+				tab.dataset.unread = 1;
+			}
+			unreadMessages++;
+			document.title = '[' + unreadMessages + '] Unread Messages';
+		}
+		return;
+	}
+	console.log(data);
+}
+
+let currentTeamID;
+let tabs = document.getElementById('tabs');
+let messageListWrap = document.getElementById('messageListWrap');
+let messageList = document.getElementById('messageList');
+let messageTemplate = document.getElementById('messageTemplate');
+let sendForm = document.forms[0];
+let taskList = document.getElementById('taskList');
+let taskMap = new Map();
+let taskCompleteButton = document.getElementById('taskCompleteButton');
+let map = document.getElementById('map');
+let unreadMessages = 0;
+
+(function() {
+	let tabTemplate = document.getElementById('tabTemplate');
+	for (let team of teams) {
+		let tab = tabTemplate.content.cloneNode(true).firstElementChild;
+		tab.dataset.team = team.id;
+		tab.style.color = team.color;
+		tab.querySelector('span').textContent = team.name;
+		tabs.insertBefore(tab, tabTemplate);
+
+		let arrowhead = document.createElementNS(SVGNS, 'marker');
+		arrowhead.setAttribute('markerUnits', 'userSpaceOnUse');
+		arrowhead.setAttribute('orient', 'auto');
+		arrowhead.setAttribute('id', 'arrowhead-team' + team.id);
+		let path = document.createElementNS(SVGNS, 'path');
+		path.setAttribute('fill', team.color);
+		path.setAttribute('d', 'M -24,0 L -32,-10 L 0,0 L -32,10 L -24,0 z');
+		arrowhead.appendChild(path);
+		map.querySelector('defs').appendChild(arrowhead);
+	}
+	tabTemplate.remove();
+
+	let taskTemplate = document.getElementById('taskTemplate');
+	for (let task of tasks) {
+		let li = taskTemplate.content.cloneNode(true).firstElementChild;
+		li.dataset.task = task.id;
+		li.querySelector('span').textContent = task.name;
+		taskList.insertBefore(li, taskTemplate);
+		taskMap.set(task.id, li);
+
+		let marker = document.createElementNS(SVGNS, 'use');
+		marker.setAttributeNS(XLINKNS, 'href', '#marker');
+		marker.setAttribute('title', task.name);
+		marker.setAttribute('x', task.x);
+		marker.setAttribute('y', task.y);
+		map.querySelector('#tasks').appendChild(marker);
+	}
+	taskTemplate.remove();
+
+	changeTeam({target: tabs.firstElementChild});
+})();
+
+function changeTeam({target}) {
+	if (target.localName == 'span') {
+		target = target.parentNode;
+	}
+
+	target.classList.remove('alert');
+	if (target.dataset.unread) {
+		let unread = parseInt(target.dataset.unread, 10);
+		unreadMessages -= unread;
+		document.title = '[' + unreadMessages + '] Unread Messages';
+		target.dataset.unread = 0;
+	}
+
+	undrawArrow(currentTeamID);
+
+	let team = getTeam(target.dataset.team);
+	document.body.style.setProperty('--current-team-color', team.color);
+
+	currentTeamID = team.id;
+	updateMessageList(team.id);
+	updateTaskList(team.id);
+	drawArrow(team.id);
+}
+
+/* exported assign */
+function assign({target}) {
+	if (target.localName == 'span') {
+		target = target.parentNode;
+	}
+
+	if (target.classList.contains('current') || target.classList.contains('completed')) {
+		return;
+	}
+
+	let taskID = parseInt(target.dataset.task, 10);
+	let {distance, direction} = sendTo(currentTeamID, taskID);
+
+	sendForm.messageText.value = 'Go to ' + target.textContent + ': ' + distance + ' km, ' + direction;
+}
+
+function updateMessageList(teamID) {
+	messageList.innerHTML = '';
+	sendForm.mobileNumber.value = '';
+	sendForm.querySelector('button').disabled = true;
+	for (let m of JSON.parse(localStorage.getItem('rallyMessages'))) {
+		if (m.teamID == teamID) {
+			appendMessageDisplay(m);
+		}
+	}
+	messageListWrap.scrollTo(0, messageListWrap.scrollTopMax);
+}
+
+function appendMessageDisplay(messageData) {
+	let li = messageTemplate.content.cloneNode(true).firstElementChild;
+	li.querySelector('.messageText').textContent = messageData.messageText;
+	li.querySelector('.time').textContent = new Date(messageData.time).toTimeString().substring(0, 5);
+	li.title = messageData.mobileNumber;
+	li.classList.add(messageData.direction);
+	messageList.appendChild(li);
+
+	sendForm.mobileNumber.value = messageData.mobileNumber;
+	sendForm.querySelector('button').disabled = false;
+}
+
+/* exported sendMessage */
+function sendMessage() {
+	let time = new Date();
+	let mobileNumber = sendForm.mobileNumber.value;
+	let messageText = sendForm.messageText.value.trim();
+	sendForm.reset();
+
+	if (!messageText) {
+		return;
+	}
+
+	let messageData = {
+		direction: 'outgoing', mobileNumber, messageText, time, teamID: currentTeamID
+	};
+
+	broadcast({ action: 'outgoingMessage', messageData });
+	appendMessageDisplay(messageData);
+	messageListWrap.scrollTo(0, messageListWrap.scrollTopMax);
+}
+
+function updateTaskList(teamID) {
+	let team = getTeam(teamID);
+	let currentTask = typeof team.currentTask == 'number' ? getTask(team.currentTask) : homebase;
+
+	for (let li of taskList.children) {
+		li.classList.remove('current');
+		li.classList.remove('completed');
+	}
+
+	for (let t of team.tasksCompleted) {
+		let li = taskMap.get(t);
+		li.classList.add('completed');
+		taskList.appendChild(li);
+	}
+
+	if (!team.tasksCompleted.includes(team.currentTask)) {
+		let li = taskMap.get(team.currentTask);
+		li.classList.add('current');
+		taskList.appendChild(li);
+	}
+
+	let remaining = [...taskList.querySelectorAll('li:not(.current):not(.completed)')].sort(function(a, b) {
+		return parseInt(a.dataset.task, 10) - parseInt(b.dataset.task, 10);
+	});
+	for (let li of remaining) {
+		let taskID = parseInt(li.dataset.task, 10);
+		li.title =
+			findDistance(currentTask, getTask(taskID)) + 'km ' +
+			findDirection(currentTask, getTask(taskID));
+		taskList.appendChild(li);
+	}
+
+	taskCompleteButton.disabled = team.tasksCompleted.includes(team.currentTask);
+}
+
+function undrawArrow(teamID) {
+	let arrow = document.getElementById('arrow-team' + teamID);
+	if (arrow) {
+		arrow.remove();
+	}
+}
+
+function drawArrow(teamID) {
+	let team = getTeam(teamID);
+	let lastTask;
+	if (team.tasksCompleted.length > 0) {
+		lastTask = getTask(team.tasksCompleted[team.tasksCompleted.length - 1]);
+	} else {
+		lastTask = homebase;
+	}
+
+	let currentTask;
+	if (typeof team.currentTask == 'number') {
+		currentTask = getTask(team.currentTask);
+	} else {
+		currentTask = homebase;
+	}
+
+	let arrow = document.getElementById('arrow-team' + team.id);
+	if (!arrow) {
+		arrow = document.createElementNS(SVGNS, 'path');
+		arrow.setAttribute('id', 'arrow-team' + team.id);
+		arrow.setAttribute('fill', 'none');
+		arrow.setAttribute('stroke', team.color);
+		arrow.style.markerEnd = 'url(#arrowhead-team' + team.id + ')';
+		map.appendChild(arrow);
+	}
+	let points = [];
+	points.push(homebase.x + ',' + homebase.y);
+	for (let t of team.tasksCompleted) {
+		let task = getTask(t);
+		points.push(task.x + ',' + task.y);
+	}
+	if (!team.tasksCompleted.includes(currentTask.id)) {
+		points.push(currentTask.x + ',' + currentTask.y);
+	}
+	arrow.setAttribute('d', 'M' + points.join('L'));
+}
+
+</script>
+</body>
+</html>

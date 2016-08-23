@@ -1,0 +1,254 @@
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Unassigned Messages</title>
+<style type="text/css">
+	:root {
+		height: 100%;
+		background-color: black;
+		color: white;
+		font-family: open sans;
+		font-size: 18px;
+		line-height: 27px;
+	}
+	body {
+		height: 100%;
+		margin: 0;
+	}
+	#messageListWrap {
+		position: relative;
+		width: 600px;
+		height: 100%;
+		margin: 0 auto;
+		overflow: hidden;
+		scroll-behavior: smooth;
+	}
+	#messageList {
+		position: absolute;
+		width: 100%;
+		margin: 0;
+		padding: 1em 0;
+		list-style: none;
+	}
+	#messageList > li {
+		margin-bottom: 0.5em;
+	}
+	#messageList > li.incoming > .small::before {
+		content: '>>>';
+	}
+	#messageList > li.outgoing {
+		text-align: right;
+	}
+	#messageList > li.outgoing > .small::before {
+		content: '<<<';
+	}
+	#messageList > li > .small {
+		color: #999;
+		font-size: 12px;
+		line-height: 1;
+	}
+</style>
+</head>
+<body>
+<form onsubmit="receiveMessageFromForm(this); return false;">
+	<div><input type="text" name="mobileNumber" /></div>
+	<div><textarea name="messageText" rows="4" cols="50"></textarea></div>
+	<div><button type="submit">Send</button></div>
+</form>
+<div id="messages">
+	<div id="messageListWrap">
+		<ul id="messageList"></ul>
+	</div>
+</div>
+<template id="messageTemplate">
+	<li>
+		<div class="messageText"></div>
+		<div class="small">
+			<span class="time"></span>
+			<span class="mobileNumber"></span>
+		</div>
+		<div class="assign"><select></select><button onclick="assignTeam(this);">Assign</button></div>
+	</li>
+</template>
+<script type="text/javascript" src="data.js"></script>
+<script type="text/javascript">
+
+/* globals EventSource, teams, getTeam, broadcast */
+navigator.serviceWorker.register('/service-worker.js');
+navigator.serviceWorker.addEventListener('message', handleBroadcast);
+
+let messages = localStorage.getItem('rallyMessages');
+let nextMessageID = 1;
+if (messages) {
+	messages = JSON.parse(messages);
+	if (messages.length) {
+		nextMessageID = messages[messages.length - 1].id + 1;
+	}
+} else {
+	messages = [];
+	localStorage.setItem('rallyMessages', JSON.stringify(messages));
+}
+
+let messageListWrap = document.getElementById('messageListWrap');
+let messageList = document.getElementById('messageList');
+let messageTemplate = document.getElementById('messageTemplate');
+let eventSource;
+let unassignedMessages = 0;
+
+(function() {
+	let sheet = document.styleSheets[0];
+
+	for (let t of teams) {
+		sheet.insertRule('li[data-team="' + t.id + '"] { color: ' + t.color + '}', 0);
+		let option = document.createElement('option');
+		option.value = t.id;
+		option.textContent = t.name;
+		messageTemplate.content.querySelector('select').appendChild(option);
+	}
+
+	for (let m of messages) {
+		logMessage(m, false);
+		if (m.teamID === undefined) {
+			unassignedMessages++;
+		}
+	}
+	messageListWrap.scrollTo(0, messageListWrap.scrollTopMax);
+	document.title = '[' + unassignedMessages + '] Unassigned Messages';
+
+	if (false) {
+		eventSource = new EventSource('http://localhost:6900/');
+		eventSource.addEventListener('sms', function(event) {
+			console.log(event);
+			let { mobileNumber, messageText } = JSON.parse(event.data);
+			receiveMessage(mobileNumber, messageText);
+		});
+		eventSource.addEventListener('close', function(event) {
+			console.log(event);
+			this.close();
+		});
+		addEventListener('unload', function() {
+			eventSource.close();
+		});
+	}
+})();
+
+function handleBroadcast({data}) {
+	if (data.broadcastName != 'rally') {
+		return;
+	}
+
+	teams = JSON.parse(localStorage.getItem('rallyTeams')); // jshint ignore: line
+
+	switch (data.action) {
+	case 'outgoingMessage':
+		let { messageData } = data;
+		logMessage(messageData);
+		sendMessage(messageData.mobileNumber, messageData.messageText);
+		return;
+	}
+	console.log(data);
+}
+
+function sendMessage(mobileNumber, messageText) {
+	console.log('Send message to:', mobileNumber, messageText);
+	if (false) {
+		fetch('http://localhost:6900/send', {
+			method: 'POST',
+			body: JSON.stringify({ mobileNumber, messageText })
+		});
+	}
+}
+
+/* exported receiveMessageFromForm */
+function receiveMessageFromForm(form) {
+	let mobileNumber = form.mobileNumber.value;
+	let messageText = form.messageText.value;
+	receiveMessage(mobileNumber, messageText);
+}
+
+function receiveMessage(mobileNumber, messageText) {
+	let time = new Date();
+	let messageData = { direction: 'incoming', mobileNumber, messageText, time };
+
+	for (let t of teams) {
+		if ('mobileNumbers' in t && t.mobileNumbers.includes(mobileNumber)) {
+			messageData.teamID = t.id;
+			break;
+		}
+	}
+
+	logMessage(messageData);
+	if (messageData.teamID === undefined) {
+		unassignedMessages++;
+		document.title = '[' + unassignedMessages + '] Unassigned Messages';
+	} else {
+		broadcast({ action: 'incomingMessage', messageData });
+	}
+}
+
+function logMessage(messageData) {
+	let { id, direction, mobileNumber, messageText, time, teamID } = messageData;
+	if (id === undefined) {
+		id = nextMessageID++;
+		messages.push({ id, direction, mobileNumber, messageText, time, teamID });
+		localStorage.setItem('rallyMessages', JSON.stringify(messages));
+	}
+
+	let li = messageTemplate.content.cloneNode(true).firstElementChild;
+	li.querySelector('.messageText').textContent = messageText;
+	li.querySelector('.time').textContent = new Date(time).toTimeString().substring(0, 5);
+	li.querySelector('.mobileNumber').textContent = mobileNumber;
+	li.title = mobileNumber;
+	li.classList.add(direction);
+	li.dataset.message = id;
+	if (teamID !== undefined) {
+		li.dataset.team = teamID;
+		li.querySelector('div.assign').remove();
+	}
+	messageList.appendChild(li);
+
+	messageListWrap.scrollTo(0, messageListWrap.scrollTopMax);
+}
+
+/* exported assignTeam */
+function assignTeam(button) {
+	let li = button.parentNode.parentNode;
+	let messageID = parseInt(li.dataset.message, 10);
+	let teamID = parseInt(li.querySelector('select').value, 10);
+
+	let message;
+	for (let m of messages) {
+		if (m.id == messageID) {
+			message = m;
+			break;
+		}
+	}
+	let team = getTeam(teamID);
+	if (Array.isArray(team.mobileNumbers)) {
+		team.mobileNumbers.push(message.mobileNumber);
+	} else {
+		team.mobileNumbers = [message.mobileNumber];
+	}
+
+	let assignedMessages = [];
+	for (let m of messages) {
+		if (m.teamID === undefined && m.mobileNumber == message.mobileNumber) {
+			assignedMessages.push(m);
+			m.teamID = teamID;
+			let mLi = document.querySelector('li[data-message="' + m.id + '"]');
+			mLi.dataset.team = teamID;
+			mLi.querySelector('div.assign').remove();
+			unassignedMessages--;
+		}
+	}
+	document.title = '[' + unassignedMessages + '] Unassigned Messages';
+
+	localStorage.setItem('rallyMessages', JSON.stringify(messages));
+	for (let m of assignedMessages) {
+		broadcast({ action: 'incomingMessage', messageData: m });
+	}
+}
+
+</script>
+</body>
+</html>
